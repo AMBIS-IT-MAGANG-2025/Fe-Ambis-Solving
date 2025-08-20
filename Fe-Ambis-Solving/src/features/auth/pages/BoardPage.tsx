@@ -1,157 +1,69 @@
 import { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { DragDropContext, Droppable, Draggable, OnDragEndResponder } from '@hello-pangea/dnd';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+
+// Komponen & Store
 import { Modal } from '../../../shared/components/Modal';
+import { useBoardStore } from '../store/boardStore';
+import type {  Column } from '../store/boardStore';
+import type { Task } from '../store/boardStore';
 
-// SECTION 1: Tipe Data & Skema Validasi
-// =================================================================
-
-type Task = {
-  id: string;
-  content: string;
-};
-
-type Column = {
-  id: string;
-  title: string;
-  tasks: Task[];
-};
-
+// Skema validasi untuk form tugas
 const taskSchema = z.object({
   content: z.string().min(3, { message: 'Konten tugas minimal 3 karakter' }),
 });
 type TaskFormInputs = z.infer<typeof taskSchema>;
 
-// SECTION 2: Data Awal (Dummy Data)
-// =================================================================
-
-const initialBoardData: Column[] = [
-  {
-    id: 'planned',
-    title: 'Direncanakan',
-    tasks: [
-      { id: 'task-1', content: 'Analisis kebutuhan fitur timeline' },
-      { id: 'task-2', content: 'Desain UI/UX untuk halaman login' },
-      { id: 'task-3', content: 'Setup project backend dengan Go-Lang & Fiber' },
-    ],
-  },
-  {
-    id: 'in-progress',
-    title: 'Sedang Dikerjakan',
-    tasks: [
-      { id: 'task-4', content: 'Membuat Halaman Login (UI & Validasi)' },
-      { id: 'task-5', content: 'Implementasi Layout Utama & Navigasi' },
-    ],
-  },
-  {
-    id: 'done',
-    title: 'Selesai',
-    tasks: [
-      { id: 'task-6', content: 'Inisialisasi Proyek Frontend Vite + React' },
-      { id: 'task-7', content: 'Instalasi & Konfigurasi Dependensi Inti' },
-      { id: 'task-8', content: 'Setup Router dengan TanStack Router' },
-    ],
-  },
-];
-
-
-// SECTION 3: Komponen Utama BoardPage
-// =================================================================
 
 export function BoardPage() {
-  // ANCHOR State Management
-  const [boardData, setBoardData] = useState(initialBoardData);
+  // 1. Ambil state dan fungsi-fungsi dari global store Zustand
+  const { boardData, handleDragEnd, addTask, updateTask, deleteTask } = useBoardStore();
+  
+  // 2. State yang bersifat lokal untuk komponen ini (mengelola UI modal)
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [targetColumn, setTargetColumn] = useState<Column['id'] | null>(null);
 
+  // 3. Inisialisasi react-hook-form
   const { register, handleSubmit, formState: { errors }, reset } = useForm<TaskFormInputs>({
     resolver: zodResolver(taskSchema),
   });
 
-  // ANCHOR Handlers
-  const handleDragEnd: OnDragEndResponder = (result) => {
-    const { destination, source } = result;
-    if (!destination || (destination.droppableId === source.droppableId && destination.index === source.index)) {
-      return;
-    }
-
-    const startColumn = boardData.find(col => col.id === source.droppableId);
-    const finishColumn = boardData.find(col => col.id === destination.droppableId);
-    if (!startColumn || !finishColumn) return;
-
-    if (startColumn === finishColumn) {
-      // Pindah di kolom yang sama
-      const newTasks = Array.from(startColumn.tasks);
-      const [removed] = newTasks.splice(source.index, 1);
-      newTasks.splice(destination.index, 0, removed);
-      const newColumn: Column = { ...startColumn, tasks: newTasks };
-      const newBoardData = boardData.map(col => (col.id === newColumn.id ? newColumn : col));
-      setBoardData(newBoardData);
-    } else {
-      // Pindah ke kolom berbeda
-      const startTasks = Array.from(startColumn.tasks);
-      const [removed] = startTasks.splice(source.index, 1);
-      const newStartColumn: Column = { ...startColumn, tasks: startTasks };
-
-      const finishTasks = Array.from(finishColumn.tasks);
-      finishTasks.splice(destination.index, 0, removed);
-      const newFinishColumn: Column = { ...finishColumn, tasks: finishTasks };
-
-      const newBoardData = boardData.map(col => {
-        if (col.id === newStartColumn.id) return newStartColumn;
-        if (col.id === newFinishColumn.id) return newFinishColumn;
-        return col;
-      });
-      setBoardData(newBoardData);
-    }
-  };
-
+  // 4. Handler untuk membuka/menutup modal (logika UI)
   const handleOpenCreateModal = (columnId: Column['id']) => {
     setTargetColumn(columnId);
     setEditingTask(null);
-    reset({ content: '' });
+    reset({ content: '' }); // Kosongkan form
     setIsModalOpen(true);
   };
-
+  
   const handleOpenEditModal = (task: Task, columnId: Column['id']) => {
     setTargetColumn(columnId);
     setEditingTask(task);
-    reset({ content: task.content });
+    reset({ content: task.content }); // Isi form dengan konten yang ada
     setIsModalOpen(true);
   };
 
   const handleDeleteTask = (taskId: Task['id'], columnId: Column['id']) => {
     if (window.confirm('Apakah Anda yakin ingin menghapus tugas ini?')) {
-      const newBoardData = boardData.map(col => 
-        col.id === columnId ? { ...col, tasks: col.tasks.filter(task => task.id !== taskId) } : col
-      );
-      setBoardData(newBoardData);
+      deleteTask(columnId, taskId); // Panggil aksi dari store
     }
   };
 
+  // 5. Handler untuk submit form, yang kemudian memanggil aksi dari store
   const handleFormSubmit = (data: TaskFormInputs) => {
     if (editingTask && targetColumn) {
-      // Logika Edit
-      const newBoardData = boardData.map(col => 
-        col.id === targetColumn ? { ...col, tasks: col.tasks.map(t => t.id === editingTask.id ? { ...t, content: data.content } : t) } : col
-      );
-      setBoardData(newBoardData);
+      updateTask(targetColumn, editingTask.id, data.content); // Panggil aksi update dari store
     } else if (targetColumn) {
-      // Logika Create
-      const newTask: Task = { id: `task-${Date.now()}`, content: data.content };
-      const newBoardData = boardData.map(col => 
-        col.id === targetColumn ? { ...col, tasks: [...col.tasks, newTask] } : col
-      );
-      setBoardData(newBoardData);
+      addTask(targetColumn, data.content); // Panggil aksi create dari store
     }
-    setIsModalOpen(false);
+    setIsModalOpen(false); // Tutup modal setelah submit
   };
 
-  // ANCHOR Render JSX
+  // 6. Render komponen (JSX)
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -163,14 +75,14 @@ export function BoardPage() {
           {boardData.map((column) => (
             <Droppable key={column.id} droppableId={column.id}>
               {(provided) => (
-                <div ref={provided.innerRef} {...provided.droppableProps} className="p-4 bg-gray-100 rounded-lg">
+                <div ref={provided.innerRef} {...provided.droppableProps} className="flex flex-col p-4 bg-gray-100 rounded-lg">
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-semibold text-gray-700">{column.title}</h2>
                     <button onClick={() => handleOpenCreateModal(column.id)} className="p-1 text-gray-500 rounded hover:bg-gray-300 hover:text-gray-700">
                       <Plus size={20} />
                     </button>
                   </div>
-                  <div className="space-y-4">
+                  <div className="space-y-4 overflow-y-auto">
                     {column.tasks.map((task, index) => (
                       <Draggable key={task.id} draggableId={task.id} index={index}>
                         {(provided) => (
