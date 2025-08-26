@@ -1,17 +1,16 @@
 import { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
+import type { OnDragEndResponder } from '@hello-pangea/dnd'; // <-- FIX 2: Gunakan 'import type'
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-// Komponen & Store
+import { getBoard, createTask, deleteTask, moveTask, updateTask } from '../../services/api';
 import { Modal } from '../../../shared/components/Modal';
-import { useBoardStore } from '../store/boardStore';
-import type {  Column } from '../store/boardStore';
-import type { Task } from '../store/boardStore';
+import type { Column, Task } from '../store/boardStore';
 
-// Skema validasi untuk form tugas
 const taskSchema = z.object({
   content: z.string().min(3, { message: 'Konten tugas minimal 3 karakter' }),
 });
@@ -19,51 +18,89 @@ type TaskFormInputs = z.infer<typeof taskSchema>;
 
 
 export function BoardPage() {
-  // 1. Ambil state dan fungsi-fungsi dari global store Zustand
-  const { boardData, handleDragEnd, addTask, updateTask, deleteTask } = useBoardStore();
-  
-  // 2. State yang bersifat lokal untuk komponen ini (mengelola UI modal)
+  const queryClient = useQueryClient();
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [targetColumn, setTargetColumn] = useState<Column['id'] | null>(null);
 
-  // 3. Inisialisasi react-hook-form
   const { register, handleSubmit, formState: { errors }, reset } = useForm<TaskFormInputs>({
     resolver: zodResolver(taskSchema),
   });
 
-  // 4. Handler untuk membuka/menutup modal (logika UI)
+  const { data: boardData, isLoading, isError } = useQuery({
+    queryKey: ['board'],
+    queryFn: getBoard,
+  });
+
+  const createTaskMutation = useMutation({
+    mutationFn: createTask,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['board'] }),
+  });
+
+  const updateTaskMutation = useMutation({
+    mutationFn: updateTask,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['board'] }),
+  });
+
+   const deleteTaskMutation = useMutation({
+    mutationFn: deleteTask,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['board'] }),
+  });
+
+  const moveTaskMutation = useMutation({
+    mutationFn: moveTask,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['board'] }),
+  });
+
+  const handleDragEnd: OnDragEndResponder = (result) => {
+    const { source, destination, draggableId } = result;
+    if (!destination || (source.droppableId === destination.droppableId && source.index === destination.index)) {
+      return;
+    }
+    
+    // Panggil mutasi dengan object yang benar
+    moveTaskMutation.mutate({
+      taskId: draggableId,
+      sourceColumnId: source.droppableId,
+      destColumnId: destination.droppableId,
+      newIndex: destination.index,
+    });
+  };
+
+  const handleFormSubmit = (data: TaskFormInputs) => {
+    if (editingTask) {
+      // FIX 1: Panggil mutasi update dengan object yang benar
+      updateTaskMutation.mutate({ taskId: editingTask.id, content: data.content });
+    } else if (targetColumn) {
+      createTaskMutation.mutate({ content: data.content, columnId: targetColumn });
+    }
+    setIsModalOpen(false);
+  };
+  
+  const handleDeleteTask = (taskId: string) => {
+    if (window.confirm('Apakah Anda yakin ingin menghapus tugas ini?')) {
+      deleteTaskMutation.mutate(taskId);
+    }
+  };
+
   const handleOpenCreateModal = (columnId: Column['id']) => {
-    setTargetColumn(columnId);
     setEditingTask(null);
-    reset({ content: '' }); // Kosongkan form
+    setTargetColumn(columnId);
+    reset({ content: '' });
     setIsModalOpen(true);
   };
   
-  const handleOpenEditModal = (task: Task, columnId: Column['id']) => {
-    setTargetColumn(columnId);
+  const handleOpenEditModal = (task: Task) => {
     setEditingTask(task);
-    reset({ content: task.content }); // Isi form dengan konten yang ada
+    setTargetColumn(null);
+    reset({ content: task.content });
     setIsModalOpen(true);
   };
 
-  const handleDeleteTask = (taskId: Task['id'], columnId: Column['id']) => {
-    if (window.confirm('Apakah Anda yakin ingin menghapus tugas ini?')) {
-      deleteTask(columnId, taskId); // Panggil aksi dari store
-    }
-  };
+  if (isLoading) return <div className="p-8 text-center">Loading papan kerja...</div>;
+  if (isError) return <div className="p-8 text-center text-red-600">Terjadi error saat memuat data. Pastikan server backend sudah berjalan.</div>;
 
-  // 5. Handler untuk submit form, yang kemudian memanggil aksi dari store
-  const handleFormSubmit = (data: TaskFormInputs) => {
-    if (editingTask && targetColumn) {
-      updateTask(targetColumn, editingTask.id, data.content); // Panggil aksi update dari store
-    } else if (targetColumn) {
-      addTask(targetColumn, data.content); // Panggil aksi create dari store
-    }
-    setIsModalOpen(false); // Tutup modal setelah submit
-  };
-
-  // 6. Render komponen (JSX)
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -72,7 +109,7 @@ export function BoardPage() {
 
       <DragDropContext onDragEnd={handleDragEnd}>
         <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-          {boardData.map((column) => (
+          {boardData?.map((column) => (
             <Droppable key={column.id} droppableId={column.id}>
               {(provided) => (
                 <div ref={provided.innerRef} {...provided.droppableProps} className="flex flex-col p-4 bg-gray-100 rounded-lg">
@@ -91,13 +128,13 @@ export function BoardPage() {
                             {...provided.draggableProps}
                             {...provided.dragHandleProps}
                             className="relative p-4 bg-white rounded-md shadow-sm cursor-pointer group"
-                            onClick={() => handleOpenEditModal(task, column.id)}
+                            onClick={() => handleOpenEditModal(task)}
                           >
                             <p className="text-gray-800 break-words">{task.content}</p>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleDeleteTask(task.id, column.id);
+                                handleDeleteTask(task.id);
                               }}
                               className="absolute top-2 right-2 p-1 text-gray-400 bg-white rounded-full opacity-0 group-hover:opacity-100 hover:text-red-600"
                             >

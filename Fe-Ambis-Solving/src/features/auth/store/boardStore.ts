@@ -13,6 +13,12 @@ export type Column = {
   tasks: Task[];
 };
 
+export type Note = {
+  id: string;
+  content: string;
+  timestamp: Date; // Kita gunakan object Date agar mudah diurutkan
+};
+
 // Data Awal
 const initialBoardData: Column[] = [
   // ... (salin data dummy dari BoardPage.tsx sebelumnya ke sini)
@@ -43,14 +49,31 @@ const initialBoardData: Column[] = [
 // Definisikan state dan aksi-aksinya
 type BoardState = {
   boardData: Column[];
+  notes: Note[]; // <-- State baru
   addTask: (columnId: Column['id'], content: string) => void;
   updateTask: (columnId: Column['id'], taskId: Task['id'], content: string) => void;
   deleteTask: (columnId: Column['id'], taskId: Task['id']) => void;
   handleDragEnd: OnDragEndResponder;
+  addNote: (content: string) => void; // <-- Aksi baru
 };
 
 export const useBoardStore = create<BoardState>((set) => ({
   boardData: initialBoardData,
+  notes: [ // Data dummy untuk notes
+    { id: 'note-1', content: 'Project kick-off meeting.', timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    { id: 'note-2', content: 'Diskusi awal dengan tim backend mengenai skema database.', timestamp: new Date() },
+  ],
+
+  addNote: (content) => set((state) => ({
+    notes: [
+      ...state.notes,
+      {
+        id: `note-${Date.now()}`,
+        content,
+        timestamp: new Date(),
+      }
+    ],
+  })),
 
   addTask: (columnId, content) => set((state) => ({
     boardData: state.boardData.map(col =>
@@ -107,6 +130,7 @@ export const useBoardStore = create<BoardState>((set) => ({
         return col;
       });
     }
+      
 
     return { boardData: newBoardData };
   }),
