@@ -1,35 +1,43 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './index.css'
+// src/App.tsx
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-function App() {
-  const [count, setCount] = useState(0)
+// pastikan file ini ada & export default
+import { LoginPage } from "./features/auth/pages/LoginPage";
+import BoardPage from "./features/auth/pages/BoardPage";
 
-  return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+// React Query client (satu per app)
+const qc = new QueryClient();
+
+// Guard sederhana: butuh token untuk akses halaman terlindungi
+import type { ReactNode } from "react";
+
+function ProtectedRoute({ children }: { children: ReactNode }) {
+  const token = localStorage.getItem("token");
+  if (!token) return <Navigate to="/login" replace />;
+  return <>{children}</>;
 }
 
-export default App
+
+export default function App() {
+  return (
+    <QueryClientProvider client={qc}>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/board/:id"
+            element={
+              <ProtectedRoute>
+                <BoardPage />
+              </ProtectedRoute>
+            }
+          />
+          {/* arahkan root ke login (atau ganti ke /boards kalau kamu punya halaman list boards) */}
+          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={<div className="p-6">404 - Halaman tidak ditemukan</div>} />
+        </Routes>
+      </BrowserRouter>
+    </QueryClientProvider>
+  );
+}

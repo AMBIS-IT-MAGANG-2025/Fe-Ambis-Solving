@@ -1,81 +1,89 @@
-import type {Column} from '../auth/store/boardStore';
+// src/features/services/api.ts
+import axios from "axios";
 
+// === axios instance ===
+export const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL, // TANPA /api di env
+});
 
-const BASE_URL = 'http://localhost:8080/api'; // Sesuaikan dengan URL backend Go Anda
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem("token");
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
 
-
-export const loginUser = async (credentials: any) => { // Ganti 'any' dengan tipe data login Anda
-  const response = await fetch(`${BASE_URL}/login`, { // Pastikan endpointnya benar
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(credentials),
-  });
-
-  if (!response.ok) {
-    throw new Error('Email atau password salah');
+api.interceptors.response.use(
+  (r) => r,
+  (err) => {
+    const s = err?.response?.status;
+    const url = err?.config?.url;
+    console.error("API error:", s, url, err?.response?.data || err.message);
+    if (s === 401) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("userId");
+      if (location.pathname !== "/login") location.href = "/login";
+    }
+    return Promise.reject(err);
   }
-  return response.json(); // Backend harus mengembalikan { token: "..." }
+);
+
+// ==== AUTH ====
+export async function loginUser(payload: { email: string; password: string }) {
+  const { data } = await api.post("/api/login", payload);
+  // simpan token utk FE
+  if (data?.token) {
+    localStorage.setItem("token", data.token);
+    if (data?.userId) localStorage.setItem("userId", data.userId);
+  }
+  return data as { token: string; userId: string };
+}
+
+export async function registerUser(payload: { name: string; email: string; password: string }) {
+  const { data } = await api.post("/api/register", payload);
+  return data;
+}
+
+// ==== BOARDS/TASKS ====
+export type Column = { id: string; name: string; order?: number };
+export type Board  = { id: string; name: string; columns: Column[] };
+
+export type Task = {
+  id: string;
+  title: string;
+  description?: string;
+  columnId: string;
+  order?: number;
 };
 
-// Buat helper untuk mendapatkan headers dengan token
-const getAuthHeaders = () => {
-  const token = localStorage.getItem('authToken');
-  return {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`, // Format standar: "Bearer spasi token"
-  };
-};
+export async function getBoard(boardId: string): Promise<Board> {
+  const { data } = await api.get(`/api/boards/${boardId}`);
+  return data;
+}
 
-export const getBoard = async (): Promise<Column[]> => {
-  const response = await fetch(`${BASE_URL}/boards`, {
-    headers: getAuthHeaders(), // <-- Gunakan helper di sini
+export async function getBoardTasks(boardId: string): Promise<Task[]> {
+  const { data } = await api.get(`/api/boards/${boardId}/tasks`);
+  return Array.isArray(data) ? data : [];
+}
+
+export async function createTask(p: { boardId: string; columnId: string; title: string }) {
+  const { data } = await api.post(`/api/boards/${p.boardId}/tasks`, {
+    title: p.title,
+    columnId: p.columnId,
   });
-  if (!response.ok) throw new Error('Gagal mengambil data board');
-  return response.json();
-};
+  return data as Task;
+}
 
-export const createTask = async (data: { content: string; columnId: string }) => {
-  const response = await fetch(`${BASE_URL}/tasks`, {
-    method: 'POST',
-    headers: getAuthHeaders(), // <-- Gunakan helper di sini
-    body: JSON.stringify(data),
+export async function updateTask(p: { taskId: string; title: string }) {
+  await api.patch(`/api/tasks/${p.taskId}`, { title: p.title });
+}
+
+export async function deleteTask(taskId: string) {
+  await api.delete(`/api/tasks/${taskId}`);
+}
+
+export async function moveTask(p: { taskId: string; toColumnId: string; toPosition: number }) {
+  await api.post(`/api/tasks/${p.taskId}/move`, {
+    toColumnId: p.toColumnId,
+    toPosition: p.toPosition, // 1-based
   });
-  if (!response.ok) throw new Error('Gagal membuat tugas');
-  return response.json();
-};
-
-// ... Tambahkan fungsi untuk updateTask, deleteTask, dan moveTask di sini
-// Contoh untuk deleteTask:
-export const deleteTask = async (taskId: string) => {
-    const response = await fetch(`${BASE_URL}/tasks/${taskId}`, {
-        method: 'DELETE',
-    });
-    if (!response.ok) throw new Error('Gagal menghapus tugas');
-};
-
-export const updateTask = async (data: { taskId: string; content: string }) => {
-  const response = await fetch(`${BASE_URL}/tasks/${data.taskId}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content: data.content }),
-  });
-  if (!response.ok) throw new Error('Gagal memperbarui tugas');
-  return response.json();
-};
-
-export const moveTask = async (data: { 
-  taskId: string; 
-  sourceColumnId: string; 
-  destColumnId: string; 
-  newIndex: number; 
-}) => {
-  const response = await fetch(`${BASE_URL}/tasks/move`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  if (!response.ok) throw new Error('Gagal memindahkan tugas');
-  return response.json();
-};
-
-// Anda bisa lengkapi sisanya sesuai kebutuhan endpoint di atas
+}
