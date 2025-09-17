@@ -53,6 +53,7 @@ export type Task = {
   description?: string;
   columnId: string;
   order?: number;
+  status?: "planned" | "in_progress" | "done";
 };
 
 export async function getBoard(boardId: string): Promise<Board> {
@@ -60,9 +61,26 @@ export async function getBoard(boardId: string): Promise<Board> {
   return data;
 }
 
-export async function getBoardTasks(boardId: string): Promise<Task[]> {
-  const { data } = await api.get(`/api/boards/${boardId}/tasks`);
-  return Array.isArray(data) ? data : [];
+/** ⬇️ Baru: dukung pagination & filter */
+export type TaskQuery = {
+  status?: "planned" | "in_progress" | "done";
+  assignee?: string;
+  q?: string;
+  limit?: number;    // default 30, max 100
+  cursor?: string;   // hex ObjectId dari last item
+};
+
+export async function getBoardTasks(
+  boardId: string,
+  params: TaskQuery = {}
+): Promise<{ items: Task[]; nextCursor?: string }> {
+  const { data } = await api.get(`/api/boards/${boardId}/tasks`, { params });
+  const items: Task[] = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.items)
+    ? data.items
+    : [];
+  return { items, nextCursor: data?.nextCursor };
 }
 
 export async function createTask(p: { boardId: string; columnId: string; title: string }) {

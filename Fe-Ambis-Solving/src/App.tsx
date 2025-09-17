@@ -1,23 +1,15 @@
-// src/App.tsx
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { LoginPage } from "./features/auth/pages/LoginPage"; // atau default
+import BoardsPage from "./features/auth/pages/BoardPage";
+import BoardPage from "./features/auth/pages/BoardPage";     // detail board
 
-// pastikan file ini ada & export default
-import { LoginPage } from "./features/auth/pages/LoginPage";
-import BoardPage from "./features/auth/pages/BoardPage";
-
-// React Query client (satu per app)
 const qc = new QueryClient();
 
-// Guard sederhana: butuh token untuk akses halaman terlindungi
-import type { ReactNode } from "react";
-
-function ProtectedRoute({ children }: { children: ReactNode }) {
+function Protected({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem("token");
-  if (!token) return <Navigate to="/login" replace />;
-  return <>{children}</>;
+  return token ? <>{children}</> : <Navigate to="/login" replace />;
 }
-
 
 export default function App() {
   return (
@@ -25,17 +17,10 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route
-            path="/board/:id"
-            element={
-              <ProtectedRoute>
-                <BoardPage />
-              </ProtectedRoute>
-            }
-          />
-          {/* arahkan root ke login (atau ganti ke /boards kalau kamu punya halaman list boards) */}
-          <Route path="/" element={<Navigate to="/login" replace />} />
-          <Route path="*" element={<div className="p-6">404 - Halaman tidak ditemukan</div>} />
+          <Route path="/boards" element={<Protected><BoardsPage /></Protected>} />
+          <Route path="/board/:id" element={<Protected><BoardPage /></Protected>} />
+          <Route path="/" element={<Navigate to="/boards" replace />} />
+          <Route path="*" element={<div className="p-6">404</div>} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>
