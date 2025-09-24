@@ -29,13 +29,21 @@ api.interceptors.response.use(
 
 // ==== AUTH ====
 export async function loginUser(payload: { email: string; password: string }) {
-  const { data } = await api.post("/api/login", payload);
-  // simpan token utk FE
-  if (data?.token) {
-    localStorage.setItem("token", data.token);
-    if (data?.userId) localStorage.setItem("userId", data.userId);
+  try {
+    const { data } = await api.post("/api/login", payload); // <— /api ada di path, bukan di baseURL
+    if (data?.token) {
+      localStorage.setItem("token", data.token);
+      if (data?.userId) localStorage.setItem("userId", data.userId);
+    }
+    return data;
+  } catch (e: any) {
+    // Biar tidak cuma “Network Error”, beri pesan jelas
+    if (e?.response) {
+      const msg = e.response.data?.error || `HTTP ${e.response.status}`;
+      throw new Error(msg);
+    }
+    throw new Error("Network/CORS error: cek VITE_API_URL & CORS backend.");
   }
-  return data as { token: string; userId: string };
 }
 
 export async function registerUser(payload: { name: string; email: string; password: string }) {

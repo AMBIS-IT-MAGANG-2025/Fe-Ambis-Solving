@@ -1,5 +1,5 @@
 // src/features/auth/pages/BoardPage.tsx
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Plus, Trash2 } from "lucide-react";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
@@ -19,7 +19,7 @@ import {
   type Board,
   type Task,
 } from "../../services/api";
-
+import { socket, connectSocket, joinBoard, leaveBoard } from "../../services/socket";
 import { Modal } from "../../../shared/components/Modal";
 
 const schema = z.object({ title: z.string().min(3, "Judul minimal 3 karakter") });
@@ -33,37 +33,53 @@ export function BoardPage() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [targetColumn, setTargetColumn] = useState<string | null>(null);
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-    reset,
-  } = useForm<FormInputs>({ resolver: zodResolver(schema) });
+  const { register, handleSubmit, formState: { errors }, reset } =
+    useForm<FormInputs>({ resolver: zodResolver(schema) });
 
-  // Detail board (berisi columns)
-  const {
-    data: board,
-    isLoading: lb,
-    error: eb,
-  } = useQuery<Board>({
+  // ===== Realtime: join room & listen (pakai helpers dari socket.ts) =====
+  useEffect(() => {
+    if (!boardId) return;
+    connectSocket();
+    joinBoard(boardId);
+
+    const me = localStorage.getItem("userId");
+    const refetch = () => qc.invalidateQueries({ queryKey: ["tasks", boardId] });
+
+    const onCreated = (e: any) => { if (!e?.actorId || e.actorId !== me) refetch(); };
+    const onUpdated = (e: any) => { if (!e?.actorId || e.actorId !== me) refetch(); };
+    const onMoved   = (e: any) => { if (!e?.actorId || e.actorId !== me) refetch(); };
+    const onDeleted = (e: any) => { if (!e?.actorId || e.actorId !== me) refetch(); };
+
+    socket.on("task_created", onCreated);
+    socket.on("task_updated", onUpdated);
+    socket.on("task_moved",   onMoved);
+    socket.on("task_deleted", onDeleted);
+
+    return () => {
+      leaveBoard(boardId);
+      socket.off("task_created", onCreated);
+      socket.off("task_updated", onUpdated);
+      socket.off("task_moved",   onMoved);
+      socket.off("task_deleted", onDeleted);
+      // (socket as any).offAny?.(spy);
+    };
+  }, [boardId, qc]);
+
+  // ===== Data fetch =====
+  const { data: board, isLoading: lb, error: eb } = useQuery<Board>({
     queryKey: ["board", boardId],
     queryFn: () => getBoard(boardId!),
     enabled: !!boardId,
   });
 
-  // Tasks untuk board tsb (pakai shape { items, nextCursor })
-  const {
-    data: tasksRes,
-    isLoading: lt,
-    error: et,
-  } = useQuery<{ items: Task[]; nextCursor?: string }>({
+  const { data: tasksRes, isLoading: lt, error: et } = useQuery<{ items: Task[]; nextCursor?: string }>({
     queryKey: ["tasks", boardId],
     queryFn: () => getBoardTasks(boardId!),
     enabled: !!boardId,
   });
   const tasks: Task[] = tasksRes?.items ?? [];
 
-  // Mutations
+  // ===== Mutations =====
   const mCreate = useMutation({
     mutationFn: (p: { title: string; columnId: string }) => createTask({ boardId: boardId!, ...p }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks", boardId] }),
@@ -84,27 +100,28 @@ export function BoardPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks", boardId] }),
   });
 
-  // Drag & Drop
+  // ===== DnD handler =====
   const onDragEnd: OnDragEndResponder = (r) => {
     const { source, destination, draggableId } = r;
     if (!destination) return;
     if (source.droppableId === destination.droppableId && source.index === destination.index) return;
-    // toPosition 1-based sesuai kontrak backend
-    mMove.mutate({ taskId: draggableId, toColumnId: destination.droppableId, toPosition: destination.index + 1 });
+    mMove.mutate({
+      taskId: draggableId,
+      toColumnId: destination.droppableId, // kolom tujuan = droppableId
+      toPosition: destination.index + 1,   // 1-based
+    });
   };
 
-  // Kelompokkan tasks per columnId
+  // ===== Group tasks by column =====
   const tasksByCol: Record<string, Task[]> = useMemo(() => {
     const map: Record<string, Task[]> = {};
     (board?.columns ?? []).forEach((c) => (map[c.id] = []));
-    (tasks).forEach((t) => {
-      (map[t.columnId] ||= []).push(t);
-    });
+    tasks.forEach((t) => { (map[t.columnId] ||= []).push(t); });
     Object.keys(map).forEach((k) => map[k].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
     return map;
   }, [board, tasks]);
 
-  // Form handlers
+  // ===== Form handlers =====
   const submit = (data: FormInputs) => {
     if (editingTask) mUpdate.mutate({ taskId: editingTask.id, title: data.title });
     else if (targetColumn) mCreate.mutate({ title: data.title, columnId: targetColumn });
@@ -125,9 +142,7 @@ export function BoardPage() {
     setIsModalOpen(true);
   };
 
-  const del = (id: string) => {
-    if (confirm("Hapus task ini?")) mDelete.mutate(id);
-  };
+  const del = (id: string) => { if (confirm("Hapus task ini?")) mDelete.mutate(id); };
 
   if (lb || lt) return <div className="p-8 text-center">Memuat papan…</div>;
   if (eb || et) return <div className="p-8 text-center text-red-600">Gagal memuat data.</div>;
@@ -159,6 +174,7 @@ export function BoardPage() {
                         <Plus size={20} />
                       </button>
                     </div>
+
                     <div className="space-y-4 overflow-y-auto">
                       {(tasksByCol[col.id] ?? []).map((t, i) => (
                         <Draggable key={t.id} draggableId={t.id} index={i}>
@@ -172,10 +188,7 @@ export function BoardPage() {
                             >
                               <p className="text-gray-800 break-words">{t.title}</p>
                               <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  del(t.id);
-                                }}
+                                onClick={(e) => { e.stopPropagation(); del(t.id); }}
                                 className="absolute top-2 right-2 p-1 text-gray-400 bg-white rounded-full opacity-0 group-hover:opacity-100 hover:text-red-600"
                               >
                                 <Trash2 size={16} />
@@ -214,10 +227,7 @@ export function BoardPage() {
             >
               Batal
             </button>
-            <button
-              type="submit"
-              className="px-4 py-2 text-white bg-indigo-600 rounded-md hover:bg-indigo-700"
-            >
+            <button type="submit" className="px-4 py-2 text-white bg-indigo-600 rounded-md hover:bg-indigo-700">
               Simpan
             </button>
           </div>
@@ -227,5 +237,4 @@ export function BoardPage() {
   );
 }
 
-// optional default export agar 2 gaya import bisa dipakai
 export default BoardPage;

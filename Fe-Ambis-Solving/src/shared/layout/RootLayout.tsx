@@ -5,6 +5,8 @@ import { useQueryClient } from '@tanstack/react-query'; // <-- 2. Impor useQuery
 import { NavLink } from './NavLink';
 import { KanbanSquare, Clock, LogOut } from 'lucide-react';
 import { socket } from '../../features/auth/services/socket'; // <-- 3. Impor socket
+
+
 export function RootLayout() {
   const navigate = useNavigate();
   const queryClient = useQueryClient(); // <-- 4. Dapatkan instance queryClient
@@ -35,6 +37,8 @@ useEffect(() => {
     };
   }
 }, [queryClient]);
+
+
 
    return (
     <div className="flex h-screen bg-gray-100">

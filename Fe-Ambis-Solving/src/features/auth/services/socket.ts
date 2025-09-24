@@ -1,10 +1,10 @@
-import { io } from 'socket.io-client';
+// src/shared/socket.ts
+import { io, Socket } from "socket.io-client";
 
-// Sesuaikan URL dengan alamat backend Go Anda
-const URL = 'http://localhost:8080'; 
-
-export const socket = io(URL, {
-  // Opsi autoConnect: false berarti kita akan menyambungkan secara manual
-  // Ini adalah praktik yang baik agar koneksi tidak dibuat sebelum dibutuhkan
-  autoConnect: false,
+export const socket: Socket = io(import.meta.env.VITE_SOCKET_URL, {
+  path: import.meta.env.VITE_SOCKET_PATH || "/socket.io/",
+  transports: ["websocket", "polling"],
+  withCredentials: false,
+  autoConnect: false, // biar kita kontrol
+  auth: { token: localStorage.getItem("token") || "" },
 });

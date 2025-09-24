@@ -3,8 +3,31 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { LoginPage } from "./features/auth/pages/LoginPage"; // atau default
 import BoardsPage from "./features/auth/pages/BoardPage";
 import BoardPage from "./features/auth/pages/BoardPage";     // detail board
+import { useEffect } from "react";
+import { socket } from "../src/features/auth/services/socket";
+
+
 
 const qc = new QueryClient();
+
+export function RootSockets() {
+  useEffect(() => {
+    if (!socket.connected) socket.connect();
+
+    const onConnect = () => console.log("socket connected", socket.id);
+    const onDisconnect = (r: string) => console.log("socket disconnected", r);
+
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    return () => {
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      socket.disconnect();
+    };
+  }, []);
+
+  return null;
+}
 
 function Protected({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem("token");
