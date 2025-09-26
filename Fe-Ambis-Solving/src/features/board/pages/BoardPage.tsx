@@ -1,6 +1,6 @@
-// src/features/auth/pages/BoardPage.tsx
+// src/features/board/pages/BoardPage.tsx
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams } from "@tanstack/react-router";
 import { Plus, Trash2 } from "lucide-react";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import type { OnDragEndResponder } from "@hello-pangea/dnd";
@@ -18,15 +18,15 @@ import {
   updateTask,
   type Board,
   type Task,
-} from "../../services/api";
-import { socket, connectSocket, joinBoard, leaveBoard } from "../../services/socket";
+} from "../../../shared/services/api";
+import { socket, connectSocket, joinBoard, leaveBoard } from "../../../shared/services/socket";
 import { Modal } from "../../../shared/components/Modal";
 
 const schema = z.object({ title: z.string().min(3, "Judul minimal 3 karakter") });
 type FormInputs = z.infer<typeof schema>;
 
 export function BoardPage() {
-  const { id: boardId } = useParams();
+  const { boardId } = (useParams as any)();
   const qc = useQueryClient();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -37,6 +37,8 @@ export function BoardPage() {
     useForm<FormInputs>({ resolver: zodResolver(schema) });
 
   // ===== Realtime: join room & listen (pakai helpers dari socket.ts) =====
+  // DISABLED: WebSocket connections commented out
+  /*
   useEffect(() => {
     if (!boardId) return;
     connectSocket();
@@ -64,6 +66,7 @@ export function BoardPage() {
       // (socket as any).offAny?.(spy);
     };
   }, [boardId, qc]);
+  */
 
   // ===== Data fetch =====
   const { data: board, isLoading: lb, error: eb } = useQuery<Board>({
@@ -115,9 +118,9 @@ export function BoardPage() {
   // ===== Group tasks by column =====
   const tasksByCol: Record<string, Task[]> = useMemo(() => {
     const map: Record<string, Task[]> = {};
-    (board?.columns ?? []).forEach((c) => (map[c.id] = []));
+    (board?.columns ?? []).forEach((c: any) => (map[c.id] = []));
     tasks.forEach((t) => { (map[t.columnId] ||= []).push(t); });
-    Object.keys(map).forEach((k) => map[k].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
+    Object.keys(map).forEach((k) => map[k].sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0)));
     return map;
   }, [board, tasks]);
 
@@ -157,7 +160,7 @@ export function BoardPage() {
         <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
           {(board?.columns ?? [])
             .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-            .map((col) => (
+            .map((col: any) => (
               <Droppable key={col.id} droppableId={col.id}>
                 {(provided) => (
                   <div

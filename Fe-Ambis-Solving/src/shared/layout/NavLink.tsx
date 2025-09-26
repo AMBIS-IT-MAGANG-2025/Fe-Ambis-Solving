@@ -5,13 +5,15 @@ import type { ReactNode } from 'react';
 // Gabungkan LinkProps dengan props custom kita (children & icon)
 type NavLinkProps = LinkProps & {
   children: ReactNode;
-  icon?: ReactNode; // '?' berarti icon ini opsional
+  icon?: ReactNode;
+  onClick?: () => void;
 };
 
-export function NavLink({ children, icon, ...props }: NavLinkProps) {
+export function NavLink({ children, icon, onClick, ...props }: NavLinkProps) {
   return (
     <Link
       {...props}
+      onClick={onClick}
       // Styling untuk link yang sedang aktif
       activeProps={{
         className: 'bg-indigo-100 text-indigo-700',

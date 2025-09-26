@@ -3,9 +3,8 @@ import type { ReactNode } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useBoardStore } from '../store/boardStore';
+import { useBoardStore } from '../../../shared/store/boardStore';
 import { formatRelative } from 'date-fns';
-import { id } from 'date-fns/locale';
 
 // Skema validasi untuk form catatan
 const noteSchema = z.object({
@@ -103,7 +102,7 @@ return (
                 </div>
                 <div className="p-4 ml-4 bg-white border border-gray-200 rounded-lg shadow-sm">
                   <p className="text-sm text-gray-500">
-                    Catatan ditambahkan - {formatRelative(item.timestamp, new Date(), { locale: id })}
+                    Catatan ditambahkan - {formatRelative(item.timestamp, new Date())}
                   </p>
                   <p className="mt-1 text-gray-800 italic">"{item.content}"</p>
                 </div>

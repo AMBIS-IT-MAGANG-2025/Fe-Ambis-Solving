@@ -1,31 +1,5 @@
 // src/features/services/api.ts
-import axios from "axios";
-
-// === axios instance ===
-export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL, // TANPA /api di env
-});
-
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
-
-api.interceptors.response.use(
-  (r) => r,
-  (err) => {
-    const s = err?.response?.status;
-    const url = err?.config?.url;
-    console.error("API error:", s, url, err?.response?.data || err.message);
-    if (s === 401) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("userId");
-      if (location.pathname !== "/login") location.href = "/login";
-    }
-    return Promise.reject(err);
-  }
-);
+import { api } from "../../shared/api";
 
 // ==== AUTH ====
 export async function loginUser(payload: { email: string; password: string }) {
@@ -53,7 +27,17 @@ export async function registerUser(payload: { name: string; email: string; passw
 
 // ==== BOARDS/TASKS ====
 export type Column = { id: string; name: string; order?: number };
-export type Board  = { id: string; name: string; columns: Column[] };
+export type Board  = {
+  id: string;
+  ownerId: string;
+  name: string;
+  description?: string;
+  members: string[];
+  columns: Column[];
+  isArchived: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
 
 export type Task = {
   id: string;
@@ -112,4 +96,33 @@ export async function moveTask(p: { taskId: string; toColumnId: string; toPositi
     toColumnId: p.toColumnId,
     toPosition: p.toPosition, // 1-based
   });
+}
+
+// ==== BOARDS ====
+export async function getBoards(): Promise<Board[]> {
+  const { data } = await api.get('/api/boards');
+  return data;
+}
+
+export async function createBoard(boardData: {
+  name: string;
+  description?: string;
+  columns: Column[];
+  members?: string[];
+}): Promise<Board> {
+  const { data } = await api.post('/api/boards', boardData);
+  return data;
+}
+
+export async function updateBoard(boardId: string, updates: Partial<{
+  name: string;
+  description: string;
+  columns: Column[];
+  members: string[];
+}>): Promise<void> {
+  await api.patch(`/api/boards/${boardId}`, updates);
+}
+
+export async function deleteBoard(boardId: string): Promise<void> {
+  await api.delete(`/api/boards/${boardId}`);
 }

@@ -1,8 +1,9 @@
-// src/features/auth/services/socket.ts
+// src/shared/services/socket.ts
 import { io, type Socket } from "socket.io-client";
 
 const SOCKET_URL  = (import.meta.env.VITE_SOCKET_URL  as string) || "http://localhost:8080";
 const SOCKET_PATH = (import.meta.env.VITE_SOCKET_PATH as string) || "/socket.io/";
+const ENABLE_SOCKET = false; // Disable socket to prevent CORS errors
 
 function getToken(): string | null {
   return localStorage.getItem("authToken") || localStorage.getItem("token") || null;
@@ -29,15 +30,35 @@ export const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io(SOC
 });
 
 export function connectSocket() {
-  (socket as any).auth = { token: getToken() || undefined };
-  if (!socket.connected) socket.connect();
+  if (!ENABLE_SOCKET) return;
+  try {
+    (socket as any).auth = { token: getToken() || undefined };
+    if (!socket.connected) socket.connect();
+  } catch (error) {
+    console.warn('[SOCKET] Failed to connect:', error);
+  }
 }
-export function joinBoard(boardId: string) { connectSocket(); socket.emit("join_board", boardId); }
-export function leaveBoard(boardId: string) { socket.emit("leave_board", boardId); }
+export function joinBoard(boardId: string) {
+  if (!ENABLE_SOCKET) return;
+  try {
+    connectSocket();
+    socket.emit("join_board", boardId);
+  } catch (error) {
+    console.warn('[SOCKET] Failed to join board:', error);
+  }
+}
+export function leaveBoard(boardId: string) {
+  if (!ENABLE_SOCKET) return;
+  try {
+    socket.emit("leave_board", boardId);
+  } catch (error) {
+    console.warn('[SOCKET] Failed to leave board:', error);
+  }
+}
 
 
 /** ===== Logging ringan untuk debug dev ===== */
-if (import.meta.env.DEV) {
+if (import.meta.env.DEV && ENABLE_SOCKET) {
   socket.on("connect", () => {
     // eslint-disable-next-line no-console
     console.log("[SOCKET] connected", socket.id);
