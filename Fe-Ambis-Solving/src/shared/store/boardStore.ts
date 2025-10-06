@@ -1,137 +1,157 @@
 import { create } from 'zustand';
-import type { OnDragEndResponder } from '@hello-pangea/dnd';
 
-// Tipe Data (bisa kita pindahkan ke file types/ terpisah nanti)
-export type Task = {
-  id: string;
-  content: string;
-};
+/** ================== Types ================== */
+export type BoardTask = { id: string; content: string; updatedAt?: string | Date; };
+export type BoardColumnData = { id: string; name?: string; tasks: BoardTask[] };
 
-export type Column = {
-  id: string;
-  title: string;
-  tasks: Task[];
-};
+export type Note = { id: string; content: string; timestamp: Date };
 
-export type Note = {
-  id: string;
-  content: string;
-  timestamp: Date; // Kita gunakan object Date agar mudah diurutkan
-};
-
-// Data Awal
-const initialBoardData: Column[] = [
-  // ... (salin data dummy dari BoardPage.tsx sebelumnya ke sini)
-  {
-    id: 'planned',
-    title: 'Direncanakan',
-    tasks: [
-      { id: 'task-1', content: 'Analisis kebutuhan fitur timeline' },
-      { id: 'task-2', content: 'Desain UI/UX untuk halaman login' },
-    ],
-  },
-  {
-    id: 'in-progress',
-    title: 'Sedang Dikerjakan',
-    tasks: [
-      { id: 'task-4', content: 'Membuat Halaman Login (UI & Validasi)' },
-    ],
-  },
-  {
-    id: 'done',
-    title: 'Selesai',
-    tasks: [
-      { id: 'task-6', content: 'Inisialisasi Proyek Frontend Vite + React' },
-    ],
-  },
-];
-
-// Definisikan state dan aksi-aksinya
-type BoardState = {
-  boardData: Column[];
-  notes: Note[]; // <-- State baru
-  addTask: (columnId: Column['id'], content: string) => void;
-  updateTask: (columnId: Column['id'], taskId: Task['id'], content: string) => void;
-  deleteTask: (columnId: Column['id'], taskId: Task['id']) => void;
-  handleDragEnd: OnDragEndResponder;
-  addNote: (content: string) => void; // <-- Aksi baru
-};
-
-export const useBoardStore = create<BoardState>((set) => ({
-  boardData: initialBoardData,
-  notes: [ // Data dummy untuk notes
-    { id: 'note-1', content: 'Project kick-off meeting.', timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-    { id: 'note-2', content: 'Diskusi awal dengan tim backend mengenai skema database.', timestamp: new Date() },
-  ],
-
-  addNote: (content) => set((state) => ({
-    notes: [
-      ...state.notes,
-      {
-        id: `note-${Date.now()}`,
-        content,
-        timestamp: new Date(),
-      }
-    ],
-  })),
-
-  addTask: (columnId, content) => set((state) => ({
-    boardData: state.boardData.map(col =>
-      col.id === columnId
-        ? { ...col, tasks: [...col.tasks, { id: `task-${Date.now()}`, content }] }
-        : col
-    ),
-  })),
-
-  updateTask: (columnId, taskId, content) => set((state) => ({
-    boardData: state.boardData.map(col =>
-      col.id === columnId
-        ? { ...col, tasks: col.tasks.map(t => t.id === taskId ? { ...t, content } : t) }
-        : col
-    ),
-  })),
-
-  deleteTask: (columnId, taskId) => set((state) => ({
-    boardData: state.boardData.map(col =>
-      col.id === columnId ? { ...col, tasks: col.tasks.filter(t => t.id !== taskId) } : col
-    ),
-  })),
-
-  handleDragEnd: (result) => set((state) => {
-    const { destination, source } = result;
-    if (!destination || (destination.droppableId === source.droppableId && destination.index === source.index)) {
-      return state;
+export type TimelineEvent =
+  | {
+      id: string;
+      type: 'task_created';
+      taskId: string;
+      title?: string;        // ← baru
+      toColumnId?: string;   // ← baru
+      boardId?: string;
+      timestamp: Date;
     }
-
-    const startColumn = state.boardData.find(col => col.id === source.droppableId);
-    const finishColumn = state.boardData.find(col => col.id === destination.droppableId);
-    if (!startColumn || !finishColumn) return state;
-
-    let newBoardData = [...state.boardData];
-    
-    if (startColumn === finishColumn) {
-      const newTasks = Array.from(startColumn.tasks);
-      const [removed] = newTasks.splice(source.index, 1);
-      newTasks.splice(destination.index, 0, removed);
-      const newColumn: Column = { ...startColumn, tasks: newTasks };
-      newBoardData = newBoardData.map(col => (col.id === newColumn.id ? newColumn : col));
-    } else {
-      const startTasks = Array.from(startColumn.tasks);
-      const [removed] = startTasks.splice(source.index, 1);
-      const newStartColumn: Column = { ...startColumn, tasks: startTasks };
-
-      const finishTasks = Array.from(finishColumn.tasks);
-      finishTasks.splice(destination.index, 0, removed);
-      const newFinishColumn: Column = { ...finishColumn, tasks: finishTasks };
-
-      newBoardData = newBoardData.map(col => {
-        if (col.id === newStartColumn.id) return newStartColumn;
-        if (col.id === newFinishColumn.id) return newFinishColumn;
-        return col;
-      });
+  | {
+      id: string;
+      type: 'task_updated';
+      taskId: string;
+      title?: string;        // ← baru
+      boardId?: string;
+      timestamp: Date;
     }
-      
+  | {
+      id: string;
+      type: 'task_deleted';
+      taskId: string;
+      boardId?: string;
+      timestamp: Date;
+    }
+  | {
+      id: string;
+      type: 'task_moved';
+      taskId: string;
+      fromColumnId?: string; // ← baru
+      toColumnId?: string;   // ← baru
+      toPosition?: number;
+      boardId?: string;
+      timestamp: Date;
+    };
 
-    return { boardData: newBoardData };
+export type BoardStore = {
+  boardData: BoardColumnData[];
+  setBoardData: (d: BoardColumnData[]) => void;
+
+  notes: Note[];
+  addNote: (content: string) => void;
+  removeNote: (id: string) => void;
+  clearNotes: () => void;
+
+  events: TimelineEvent[];
+  addEvent: (e: Omit<TimelineEvent, 'id' | 'timestamp'> & { timestamp?: Date }) => void;
+  removeEvent: (id: string) => void;
+  clearEvents: () => void;
+
+  // ==== Baru: judul & label task ====
+  taskTitles: Record<string, string>;
+  setTaskTitle: (taskId: string, title: string) => void;
+  bulkSetTaskTitles: (map: Record<string, string>) => void;
+
+  taskLabels: Record<string, string[]>; // taskId -> label[]
+  addTaskLabel: (taskId: string, label: string) => void;
+  removeTaskLabel: (taskId: string, label: string) => void;
+};
+
+/** ================== LocalStorage helpers ================== */
+const NOTES_KEY  = 'ambis.notes.v1';
+const EVENTS_KEY = 'ambis.timeline.events.v1';
+const TITLES_KEY = 'ambis.taskTitles.v1';
+const LABELS_KEY = 'ambis.taskLabels.v1';
+
+const uid = () =>
+  typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function'
+    ? (crypto as any).randomUUID()
+    : `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+function load<T>(key: string, reviveDates = false): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return (Array.isArray(raw) ? [] : {}) as T;
+    const val = JSON.parse(raw);
+    if (!reviveDates) return val;
+    // revive timestamp fields if array of objects with timestamp
+    if (Array.isArray(val)) {
+      return val.map((e: any) => (e?.timestamp ? { ...e, timestamp: new Date(e.timestamp) } : e)) as T;
+    }
+    return val as T;
+  } catch {
+    return ({} as unknown) as T;
+  }
+}
+const save = (key: string, v: any) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch {} };
+
+export const useBoardStore = create<BoardStore>((set, get) => ({
+  boardData: [],
+  setBoardData: (d) => set({ boardData: d }),
+
+  notes: load<Note[]>(NOTES_KEY, true) ?? [],
+  addNote: (content) => set((s) => {
+    const next: Note = { id: uid(), content, timestamp: new Date() };
+    const notes = [next, ...s.notes].slice(0, 1000);
+    save(NOTES_KEY, notes);
+    return { notes };
+  }),
+  removeNote: (id) => set((s) => {
+    const notes = s.notes.filter(n => n.id !== id);
+    save(NOTES_KEY, notes);
+    return { notes };
+  }),
+  clearNotes: () => { save(NOTES_KEY, []); set({ notes: [] }); },
+
+  events: load<TimelineEvent[]>(EVENTS_KEY, true) ?? [],
+  addEvent: (payload) => set((s) => {
+    const ev: TimelineEvent = { id: uid(), timestamp: payload.timestamp ?? new Date(), ...(payload as any) };
+    const events = [ev, ...s.events].slice(0, 2000);
+    save(EVENTS_KEY, events);
+    return { events };
+  }),
+  removeEvent: (id) => set((s) => {
+    const events = s.events.filter(e => e.id !== id);
+    save(EVENTS_KEY, events);
+    return { events };
+  }),
+  clearEvents: () => { save(EVENTS_KEY, []); set({ events: [] }); },
+
+  // ==== Titles ====
+  taskTitles: load<Record<string, string>>(TITLES_KEY) ?? {},
+  setTaskTitle: (taskId, title) => set((s) => {
+    const taskTitles = { ...s.taskTitles, [taskId]: title };
+    save(TITLES_KEY, taskTitles);
+    return { taskTitles };
+  }),
+  bulkSetTaskTitles: (map) => set((s) => {
+    const taskTitles = { ...s.taskTitles, ...map };
+    save(TITLES_KEY, taskTitles);
+    return { taskTitles };
+  }),
+
+  // ==== Labels ====
+  taskLabels: load<Record<string, string[]>>(LABELS_KEY) ?? {},
+  addTaskLabel: (taskId, label) => set((s) => {
+    const cur = s.taskLabels[taskId] ?? [];
+    if (cur.includes(label)) return {};
+    const taskLabels = { ...s.taskLabels, [taskId]: [...cur, label] };
+    save(LABELS_KEY, taskLabels);
+    return { taskLabels };
+  }),
+  removeTaskLabel: (taskId, label) => set((s) => {
+    const cur = s.taskLabels[taskId] ?? [];
+    const taskLabels = { ...s.taskLabels, [taskId]: cur.filter(l => l !== label) };
+    save(LABELS_KEY, taskLabels);
+    return { taskLabels };
   }),
 }));

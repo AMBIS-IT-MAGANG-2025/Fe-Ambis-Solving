@@ -1,242 +1,432 @@
 // src/features/board/pages/BoardPage.tsx
-import { useEffect, useMemo, useState } from "react";
-import { useParams } from "@tanstack/react-router";
-import { Plus, Trash2 } from "lucide-react";
-import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
-import type { OnDragEndResponder } from "@hello-pangea/dnd";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+import React, { useMemo, useState } from "react";
+import {
+  DragDropContext,
+  Droppable,
+  Draggable,
+  type DropResult,
+} from "@hello-pangea/dnd";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-
 import {
   getBoard,
   getBoardTasks,
   createTask,
+  updateTask,
   deleteTask,
   moveTask,
-  updateTask,
-  type Board,
-  type Task,
 } from "../../../shared/services/api";
-import { socket, connectSocket, joinBoard, leaveBoard } from "../../../shared/services/socket";
-import { Modal } from "../../../shared/components/Modal";
+import { Plus, Pencil, Trash2, RefreshCw } from "lucide-react";
+import { useBoardStore } from "../../../shared/store/boardStore";
 
-const schema = z.object({ title: z.string().min(3, "Judul minimal 3 karakter") });
-type FormInputs = z.infer<typeof schema>;
+/** ===== Types (samakan dengan API) ===== */
+type BoardColumn = { id: string; name: string; order: number };
+type Board = { id: string; name: string; description?: string; columns: BoardColumn[] };
+// penting: order optional agar cocok dengan API yang bisa undefined
+type Task = { id: string; title: string; columnId: string; order?: number };
 
-export function BoardPage() {
-  const { boardId } = (useParams as any)();
+/** ===== Util: validasi 24-hex ===== */
+const isHex24 = (s: string) => /^[a-f0-9]{24}$/i.test(s);
+
+/** ===== Status helper untuk pewarnaan kartu ===== */
+type Status = "todo" | "inprogress" | "done";
+
+const COLUMN_KEYS = {
+  todo: ["todo", "planned", "backlog", "direncanakan"],
+  inprogress: ["in-progress", "progress", "doing", "dikerjakan"],
+  done: ["done", "selesai", "completed"],
+} as const;
+
+function columnStatus(col: { id: string; name?: string }): Status {
+  const id = (col.id || "").toLowerCase();
+  const name = (col.name || "").toLowerCase();
+  if (COLUMN_KEYS.done.some((k) => id === k || name.includes(k))) return "done";
+  if (COLUMN_KEYS.inprogress.some((k) => id === k || name.includes(k))) return "inprogress";
+  return "todo";
+}
+
+function taskCardClasses(status: Status, dragging: boolean) {
+  const ring = dragging ? " ring-2 ring-blue-500" : "";
+  switch (status) {
+    case "inprogress":
+      return (
+        "mb-2 rounded-xl border p-3 shadow-sm transition " +
+        "border-blue-200 bg-blue-50 text-blue-900 " +
+        "dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-100" +
+        ring
+      );
+    case "done":
+      return (
+        "mb-2 rounded-xl border p-3 shadow-sm transition " +
+        "border-emerald-200 bg-emerald-50 text-emerald-900 " +
+        "dark:border-emerald-900/40 dark:bg-emerald-900/20 dark:text-emerald-100" +
+        ring
+      );
+    default:
+      return (
+        "mb-2 rounded-xl border p-3 shadow-sm transition " +
+        "border-slate-200 bg-white text-slate-900 " +
+        "dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100" +
+        ring
+      );
+  }
+}
+
+/** Cari boardId dari props, params, query, atau path */
+function useSafeBoardId(propId?: string): string | null {
+  if (propId && isHex24(propId)) return propId;
+
+  try {
+    // @ts-ignore - biar aman kalau route augmentation belum kena
+    const { useParams } = require("@tanstack/react-router");
+    if (useParams) {
+      // @ts-ignore
+      const p = useParams({ from: "/boards/$boardId" }) as { boardId?: string };
+      if (p?.boardId && isHex24(p.boardId)) return p.boardId;
+    }
+  } catch {}
+
+  const qs = new URLSearchParams(window.location.search).get("boardId");
+  if (qs && isHex24(qs)) return qs;
+
+  const parts = window.location.pathname.split("/").filter(Boolean);
+  const i = parts.findIndex((x) => ["boards", "board"].includes(x.toLowerCase()));
+  if (i >= 0 && parts[i + 1] && isHex24(parts[i + 1])) return parts[i + 1];
+
+  const last = parts.at(-1);
+  if (last && isHex24(last)) return last;
+
+  return null;
+}
+
+function SectionHeader({ title, onRefresh }: { title: string; onRefresh?: () => void }) {
+  return (
+    <div className="mb-2 flex items-center justify-between">
+      <h3 className="font-semibold text-slate-900 dark:text-slate-100">{title}</h3>
+      {onRefresh && (
+        <button
+          onClick={onRefresh}
+          className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+          title="Refresh tasks"
+        >
+          <RefreshCw className="size-3.5" />
+          Refresh
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function BoardPage(props: { boardId?: string }) {
+  const boardId = useSafeBoardId(props.boardId);
   const qc = useQueryClient();
+  const { addEvent } = useBoardStore(); // payload minimal saja supaya cocok tipe store sekarang
 
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [targetColumn, setTargetColumn] = useState<string | null>(null);
+  if (!boardId) {
+    return (
+      <div className="p-6">
+        <p className="text-sm text-red-600">
+          Board ID tidak valid. Gunakan rute{" "}
+          <code>/boards/&lt;24-hex&gt;</code> atau tambahkan <code>?boardId=&lt;id&gt;</code>.
+        </p>
+      </div>
+    );
+  }
 
-  const { register, handleSubmit, formState: { errors }, reset } =
-    useForm<FormInputs>({ resolver: zodResolver(schema) });
-
-  // ===== Realtime: join room & listen (pakai helpers dari socket.ts) =====
-  // DISABLED: WebSocket connections commented out
-  /*
-  useEffect(() => {
-    if (!boardId) return;
-    connectSocket();
-    joinBoard(boardId);
-
-    const me = localStorage.getItem("userId");
-    const refetch = () => qc.invalidateQueries({ queryKey: ["tasks", boardId] });
-
-    const onCreated = (e: any) => { if (!e?.actorId || e.actorId !== me) refetch(); };
-    const onUpdated = (e: any) => { if (!e?.actorId || e.actorId !== me) refetch(); };
-    const onMoved   = (e: any) => { if (!e?.actorId || e.actorId !== me) refetch(); };
-    const onDeleted = (e: any) => { if (!e?.actorId || e.actorId !== me) refetch(); };
-
-    socket.on("task_created", onCreated);
-    socket.on("task_updated", onUpdated);
-    socket.on("task_moved",   onMoved);
-    socket.on("task_deleted", onDeleted);
-
-    return () => {
-      leaveBoard(boardId);
-      socket.off("task_created", onCreated);
-      socket.off("task_updated", onUpdated);
-      socket.off("task_moved",   onMoved);
-      socket.off("task_deleted", onDeleted);
-      // (socket as any).offAny?.(spy);
-    };
-  }, [boardId, qc]);
-  */
-
-  // ===== Data fetch =====
-  const { data: board, isLoading: lb, error: eb } = useQuery<Board>({
+  /** ===== Queries ===== */
+  const {
+    data: board,
+    isLoading: loadingBoard,
+    isError: errBoard,
+    refetch: refetchBoard,
+  } = useQuery<Board>({
     queryKey: ["board", boardId],
-    queryFn: () => getBoard(boardId!),
-    enabled: !!boardId,
+    queryFn: () => getBoard(boardId) as Promise<Board>,
   });
 
-  const { data: tasksRes, isLoading: lt, error: et } = useQuery<{ items: Task[]; nextCursor?: string }>({
+  const {
+    data: tasksRes,
+    isLoading: loadingTasks,
+    isError: errTasks,
+    refetch: refetchTasks,
+  } = useQuery<{ items: Task[] }>({
     queryKey: ["tasks", boardId],
-    queryFn: () => getBoardTasks(boardId!),
-    enabled: !!boardId,
-  });
-  const tasks: Task[] = tasksRes?.items ?? [];
-
-  // ===== Mutations =====
-  const mCreate = useMutation({
-    mutationFn: (p: { title: string; columnId: string }) => createTask({ boardId: boardId!, ...p }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks", boardId] }),
+    queryFn: () => getBoardTasks(boardId) as Promise<{ items: Task[] }>,
   });
 
-  const mUpdate = useMutation({
-    mutationFn: (p: { taskId: string; title: string }) => updateTask(p),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks", boardId] }),
+  const tasks: Task[] = useMemo(() => (tasksRes?.items ?? []).slice(), [tasksRes]);
+
+  /** ===== Mutations (catat event: payload MINIMAL) ===== */
+  const mCreate = useMutation<Task, Error, { title: string; columnId: string }>({
+    mutationFn: (p) => createTask({ boardId, ...p }) as Promise<Task>,
+    onSuccess: (task) => {
+      qc.invalidateQueries({ queryKey: ["tasks", boardId] });
+      addEvent({ type: "task_created", taskId: task.id, boardId });
+    },
   });
 
-  const mDelete = useMutation({
-    mutationFn: (taskId: string) => deleteTask(taskId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks", boardId] }),
+  const mUpdate = useMutation<void, Error, { taskId: string; title: string }>({
+    mutationFn: (p) => updateTask(p),
+    onSuccess: (_res, vars) => {
+      qc.invalidateQueries({ queryKey: ["tasks", boardId] });
+      addEvent({ type: "task_updated", taskId: vars.taskId, boardId });
+    },
   });
 
-  const mMove = useMutation({
-    mutationFn: (p: { taskId: string; toColumnId: string; toPosition: number }) => moveTask(p),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks", boardId] }),
+  const mDelete = useMutation<void, Error, string>({
+    mutationFn: (taskId) => deleteTask(taskId),
+    onSuccess: (_res, taskId) => {
+      qc.invalidateQueries({ queryKey: ["tasks", boardId] });
+      addEvent({ type: "task_deleted", taskId, boardId });
+    },
   });
 
-  // ===== DnD handler =====
-  const onDragEnd: OnDragEndResponder = (r) => {
-    const { source, destination, draggableId } = r;
+  const mMove = useMutation<void, Error, { taskId: string; toColumnId: string; toPosition: number }>(
+    {
+      mutationFn: (p) => moveTask(p) as Promise<void>,
+      onSuccess: (_res, vars) => {
+        qc.invalidateQueries({ queryKey: ["tasks", boardId] });
+        // Hanya kirim field yang diakui store
+        addEvent({ type: "task_moved", taskId: vars.taskId, boardId });
+      },
+    }
+  );
+
+  /** ===== State judul baru per kolom ===== */
+  const [newTitleByCol, setNewTitleByCol] = useState<Record<string, string>>({});
+  const setTitle = (colId: string, v: string) =>
+    setNewTitleByCol((s) => ({ ...s, [colId]: v }));
+
+  const columns = useMemo(
+    () => (board?.columns ?? []).slice().sort((a, b) => a.order - b.order),
+    [board]
+  );
+
+  const tasksByCol = (colId: string) =>
+    tasks
+      .filter((t) => t.columnId === colId)
+      .slice()
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+  /** ===== DnD handler ===== */
+  const onDragEnd = (result: DropResult) => {
+    const { source, destination, draggableId } = result;
     if (!destination) return;
-    if (source.droppableId === destination.droppableId && source.index === destination.index) return;
+    if (
+      source.droppableId === destination.droppableId &&
+      source.index === destination.index
+    )
+      return;
+
     mMove.mutate({
       taskId: draggableId,
-      toColumnId: destination.droppableId, // kolom tujuan = droppableId
-      toPosition: destination.index + 1,   // 1-based
+      toColumnId: destination.droppableId,
+      toPosition: destination.index + 1,
     });
   };
 
-  // ===== Group tasks by column =====
-  const tasksByCol: Record<string, Task[]> = useMemo(() => {
-    const map: Record<string, Task[]> = {};
-    (board?.columns ?? []).forEach((c: any) => (map[c.id] = []));
-    tasks.forEach((t) => { (map[t.columnId] ||= []).push(t); });
-    Object.keys(map).forEach((k) => map[k].sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0)));
-    return map;
-  }, [board, tasks]);
+  /** ===== UI states ===== */
+  if (loadingBoard || loadingTasks) {
+    return (
+      <div className="grid gap-4 p-6 md:grid-cols-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div
+            key={i}
+            className="min-h-[420px] rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900"
+          >
+            <div className="mb-2 h-4 w-1/3 animate-pulse rounded bg-slate-300 dark:bg-slate-700" />
+            {Array.from({ length: 6 }).map((__, j) => (
+              <div
+                key={j}
+                className="mb-2 h-16 animate-pulse rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+    );
+  }
 
-  // ===== Form handlers =====
-  const submit = (data: FormInputs) => {
-    if (editingTask) mUpdate.mutate({ taskId: editingTask.id, title: data.title });
-    else if (targetColumn) mCreate.mutate({ title: data.title, columnId: targetColumn });
-    setIsModalOpen(false);
-  };
+  if (errBoard || errTasks) {
+    return (
+      <div className="p-6">
+        <p className="text-sm text-red-600">
+          Gagal memuat board atau tasks.{" "}
+          <button
+            className="underline"
+            onClick={() => {
+              refetchBoard();
+              refetchTasks();
+            }}
+          >
+            Coba lagi
+          </button>
+        </p>
+      </div>
+    );
+  }
 
-  const openCreate = (colId: string) => {
-    setEditingTask(null);
-    setTargetColumn(colId);
-    reset({ title: "" });
-    setIsModalOpen(true);
-  };
-
-  const openEdit = (t: Task) => {
-    setEditingTask(t);
-    setTargetColumn(null);
-    reset({ title: t.title });
-    setIsModalOpen(true);
-  };
-
-  const del = (id: string) => { if (confirm("Hapus task ini?")) mDelete.mutate(id); };
-
-  if (lb || lt) return <div className="p-8 text-center">Memuat papan…</div>;
-  if (eb || et) return <div className="p-8 text-center text-red-600">Gagal memuat data.</div>;
-
+  /** ===== Render ===== */
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold text-gray-800">{board?.name ?? "Board"}</h1>
+    <div className="p-4 md:p-6 text-slate-900 dark:text-slate-100">
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-semibold">{board?.name ?? "Board"}</h1>
+          {board?.description && (
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              {board.description}
+            </p>
+          )}
+        </div>
       </div>
 
       <DragDropContext onDragEnd={onDragEnd}>
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-          {(board?.columns ?? [])
-            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-            .map((col: any) => (
-              <Droppable key={col.id} droppableId={col.id}>
-                {(provided) => (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          {columns.map((col) => (
+            <Droppable droppableId={col.id} key={col.id}>
+              {(provided) => {
+                const status = columnStatus(col); // status kolom saat ini
+                return (
                   <div
                     ref={provided.innerRef}
                     {...provided.droppableProps}
-                    className="flex flex-col p-4 bg-gray-100 rounded-lg"
+                    className="min-h-[420px] rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900"
                   >
-                    <div className="flex items-center justify-between mb-4">
-                      <h2 className="text-lg font-semibold text-gray-700">{col.name}</h2>
-                      <button
-                        onClick={() => openCreate(col.id)}
-                        className="p-1 text-gray-500 rounded hover:bg-gray-300 hover:text-gray-700"
-                      >
-                        <Plus size={20} />
-                      </button>
-                    </div>
+                    <SectionHeader
+                      title={col.name}
+                      onRefresh={() =>
+                        qc.invalidateQueries({ queryKey: ["tasks", boardId] })
+                      }
+                    />
 
-                    <div className="space-y-4 overflow-y-auto">
-                      {(tasksByCol[col.id] ?? []).map((t, i) => (
-                        <Draggable key={t.id} draggableId={t.id} index={i}>
-                          {(prov) => (
-                            <div
-                              ref={prov.innerRef}
-                              {...prov.draggableProps}
-                              {...prov.dragHandleProps}
-                              className="relative p-4 bg-white rounded-md shadow-sm cursor-pointer group"
-                              onClick={() => openEdit(t)}
-                            >
-                              <p className="text-gray-800 break-words">{t.title}</p>
+                    {/* Tambah task cepat */}
+                    <form
+                      className="mb-3 flex gap-2"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const title = (newTitleByCol[col.id] || "").trim();
+                        if (!title) return;
+                        mCreate.mutate(
+                          { title, columnId: col.id },
+                          { onSuccess: () => setTitle(col.id, "") }
+                        );
+                      }}
+                    >
+                      <input
+                        value={newTitleByCol[col.id] || ""}
+                        onChange={(e) => setTitle(col.id, e.target.value)}
+                        placeholder="Tambah task…"
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-indigo-400/40"
+                      />
+                      <button
+                        type="submit"
+                        className="inline-flex items-center gap-1 rounded-xl bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                        disabled={mCreate.isPending}
+                        title="Tambah task"
+                      >
+                        <Plus className="size-4" />
+                        Add
+                      </button>
+                    </form>
+
+                    {/* List task */}
+                    {tasksByCol(col.id).map((t, index) => (
+                      <Draggable draggableId={t.id} index={index} key={t.id}>
+                        {(prov, snap) => (
+                          <div
+                            ref={prov.innerRef}
+                            {...prov.draggableProps}
+                            {...prov.dragHandleProps}
+                            className={taskCardClasses(status, snap.isDragging)}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="min-w-0 text-sm">
+                                <InlineEditableTitle
+                                  title={t.title}
+                                  onSave={(title) =>
+                                    mUpdate.mutate({ taskId: t.id, title })
+                                  }
+                                />
+                              </div>
                               <button
-                                onClick={(e) => { e.stopPropagation(); del(t.id); }}
-                                className="absolute top-2 right-2 p-1 text-gray-400 bg-white rounded-full opacity-0 group-hover:opacity-100 hover:text-red-600"
+                                onClick={() => mDelete.mutate(t.id)}
+                                className="rounded-md p-1 text-slate-600 hover:bg-slate-100 hover:text-red-600 dark:text-slate-300 dark:hover:bg-slate-800"
+                                title="Hapus task"
                               >
-                                <Trash2 size={16} />
+                                <Trash2 className="size-4" />
                               </button>
                             </div>
-                          )}
-                        </Draggable>
-                      ))}
-                      {provided.placeholder}
-                    </div>
+                          </div>
+                        )}
+                      </Draggable>
+                    ))}
+                    {provided.placeholder}
                   </div>
-                )}
-              </Droppable>
-            ))}
+                );
+              }}
+            </Droppable>
+          ))}
         </div>
       </DragDropContext>
-
-      <Modal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        title={editingTask ? "Edit Tugas" : "Buat Tugas Baru"}
-      >
-        <form onSubmit={handleSubmit(submit)}>
-          <textarea
-            {...register("title")}
-            rows={4}
-            className={`w-full p-2 border rounded-md ${errors.title ? "border-red-500" : "border-gray-300"}`}
-            placeholder="Judul tugas…"
-          />
-          {errors.title && <p className="mt-1 text-sm text-red-600">{errors.title.message}</p>}
-          <div className="flex justify-end gap-4 mt-4">
-            <button
-              type="button"
-              onClick={() => setIsModalOpen(false)}
-              className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
-            >
-              Batal
-            </button>
-            <button type="submit" className="px-4 py-2 text-white bg-indigo-600 rounded-md hover:bg-indigo-700">
-              Simpan
-            </button>
-          </div>
-        </form>
-      </Modal>
     </div>
+  );
+}
+
+function InlineEditableTitle({
+  title,
+  onSave,
+}: {
+  title: string;
+  onSave: (next: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(title);
+
+  return editing ? (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        const next = val.trim();
+        if (!next || next === title) {
+          setEditing(false);
+          return;
+        }
+        onSave(next);
+        setEditing(false);
+      }}
+      className="flex items-center gap-2"
+    >
+      <input
+        autoFocus
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        className="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-indigo-400/40"
+      />
+      <button
+        type="submit"
+        className="rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+      >
+        Save
+      </button>
+      <button
+        type="button"
+        className="rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+        onClick={() => {
+          setVal(title);
+          setEditing(false);
+        }}
+      >
+        Cancel
+      </button>
+    </form>
+  ) : (
+    <button
+      onClick={() => setEditing(true)}
+      className="group inline-flex max-w-full items-center gap-2"
+      title="Edit judul"
+    >
+      <span className="truncate">{title}</span>
+      <Pencil className="size-3.5 text-slate-400 opacity-0 group-hover:opacity-100 dark:text-slate-500" />
+    </button>
   );
 }
 

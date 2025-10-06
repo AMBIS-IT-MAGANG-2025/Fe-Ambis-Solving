@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
 import { Plus, Trash2, Users, Calendar } from 'lucide-react';
 import { getBoards, createBoard, deleteBoard, type Board } from '../../../shared/services/api';
 import { Modal } from '../../../shared/components/Modal';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import { Link } from '@tanstack/react-router';
 
 const createBoardSchema = z.object({
   name: z.string().min(1, 'Nama board wajib diisi'),
@@ -16,7 +16,6 @@ const createBoardSchema = z.object({
 type CreateBoardForm = z.infer<typeof createBoardSchema>;
 
 export function BoardsPage() {
-  const navigate = useNavigate();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const qc = useQueryClient();
 
@@ -48,9 +47,9 @@ export function BoardsPage() {
 
   const onCreateSubmit = (data: CreateBoardForm) => {
     const defaultColumns = [
-      { id: 'todo', name: 'To Do', order: 0 },
-      { id: 'in-progress', name: 'In Progress', order: 1 },
-      { id: 'done', name: 'Done', order: 2 },
+      { id: 'todo',         name: 'To Do',       order: 0 },
+      { id: 'in-progress',  name: 'In Progress', order: 1 },
+      { id: 'done',         name: 'Done',        order: 2 },
     ];
 
     createMutation.mutate({
@@ -69,30 +68,30 @@ export function BoardsPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-64">
-        <div className="text-gray-500">Memuat boards...</div>
+      <div className="flex items-center justify-center min-h-64 text-slate-500 dark:text-slate-300">
+        Memuat boards...
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex items-center justify-center min-h-64">
-        <div className="text-red-500">Gagal memuat boards</div>
+      <div className="flex items-center justify-center min-h-64 text-red-600">
+        Gagal memuat boards
       </div>
     );
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-8">
+    <div className="text-slate-900 dark:text-slate-100">
+      <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Boards</h1>
-          <p className="text-gray-600 mt-1">Kelola proyek dan tugas Anda</p>
+          <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100">Boards</h1>
+          <p className="mt-1 text-slate-600 dark:text-slate-300">Kelola proyek dan tugas Anda</p>
         </div>
         <button
           onClick={() => setIsCreateModalOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700"
         >
           <Plus size={20} />
           Buat Board Baru
@@ -100,52 +99,59 @@ export function BoardsPage() {
       </div>
 
       {boards.length === 0 ? (
-        <div className="text-center py-12">
-          <div className="text-gray-400 mb-4">
+        <div className="py-12 text-center">
+          <div className="mb-4 text-slate-400 dark:text-slate-500">
             <Users size={64} className="mx-auto" />
           </div>
-          <h3 className="text-lg font-medium text-gray-900 mb-2">Belum ada board</h3>
-          <p className="text-gray-500 mb-6">Buat board pertama Anda untuk mulai mengorganisir tugas</p>
+          <h3 className="mb-2 text-lg font-medium text-slate-900 dark:text-slate-100">Belum ada board</h3>
+          <p className="mb-6 text-slate-500 dark:text-slate-300">
+            Buat board pertama Anda untuk mulai mengorganisir tugas
+          </p>
           <button
             onClick={() => setIsCreateModalOpen(true)}
-            className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-white transition-colors hover:bg-blue-700"
           >
             <Plus size={20} />
             Buat Board Pertama
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
           {boards.map((board: Board) => (
             <div
               key={board.id}
-              className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
+              className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md
+                         dark:border-slate-800 dark:bg-slate-900"
             >
-              <div className="flex items-start justify-between mb-4">
+              <div className="mb-4 flex items-start justify-between">
                 <div className="flex-1">
-                  <button
-                    onClick={() => navigate({ to: '/board/$boardId' as any, params: { boardId: board.id } as any })}
-                    className="text-lg font-semibold text-gray-900 hover:text-indigo-600 transition-colors text-left"
-                  >
-                    {board.name}
-                  </button>
+                  {/* Judul sebagai link ke /boards/<id> */}
+                  <Link to={`/boards/${board.id}` as any}>
+                    <span className="cursor-pointer text-lg font-semibold text-slate-900 transition-colors hover:text-blue-600 dark:text-slate-100">
+                      {board.name}
+                    </span>
+                  </Link>
+
                   {board.description && (
-                    <p className="text-gray-600 text-sm mt-1">{board.description}</p>
+                    <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{board.description}</p>
                   )}
                 </div>
+
                 <button
                   onClick={() => handleDelete(board.id, board.name)}
-                  className="text-gray-400 hover:text-red-600 transition-colors p-1"
+                  className="p-1 text-slate-400 transition-colors hover:text-red-600 dark:text-slate-500"
                   title="Hapus board"
                 >
                   <Trash2 size={16} />
                 </button>
               </div>
 
-              <div className="flex items-center justify-between text-sm text-gray-500">
+              <div className="flex items-center justify-between text-sm text-slate-500 dark:text-slate-400">
                 <div className="flex items-center gap-1">
                   <Users size={16} />
-                  <span>{board.members.length} member</span>
+                  <span>
+                    {Array.isArray(board.members) ? board.members.length : board.members} member
+                  </span>
                 </div>
                 <div className="flex items-center gap-1">
                   <Calendar size={16} />
@@ -154,12 +160,14 @@ export function BoardsPage() {
               </div>
 
               <div className="mt-4">
-                <button
-                  onClick={() => navigate({ to: '/board/$boardId' as any, params: { boardId: board.id } as any })}
-                  className="w-full inline-flex justify-center items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-                >
-                  Buka Board
-                </button>
+                <Link to={`/boards/${board.id}` as any}>
+                  <button
+                    className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 transition
+                               hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Buka Board
+                  </button>
+                </Link>
               </div>
             </div>
           ))}
@@ -173,30 +181,43 @@ export function BoardsPage() {
       >
         <form onSubmit={handleSubmit(onCreateSubmit)} className="space-y-4">
           <div>
-            <label htmlFor="board-name" className="block text-sm font-medium text-gray-700 mb-1">
+            <label
+              htmlFor="board-name"
+              className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300"
+            >
               Nama Board
             </label>
             <input
               id="board-name"
               type="text"
               {...register('name')}
-              className={`w-full px-3 py-2 border rounded-md shadow-sm ${
-                errors.name ? 'border-red-500' : 'border-gray-300'
-              }`}
+              className={`w-full rounded-md border px-3 py-2 shadow-sm outline-none
+                          ${errors.name ? 'border-red-500' : 'border-slate-300 dark:border-slate-700'}
+                          bg-white text-slate-900 placeholder:text-slate-400
+                          dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500
+                          focus:ring-2 focus:ring-indigo-500/50 dark:focus:ring-indigo-400/40`}
               placeholder="Masukkan nama board"
             />
-            {errors.name && <p className="mt-1 text-sm text-red-600">{errors.name.message}</p>}
+            {errors.name && (
+              <p className="mt-1 text-sm text-red-600">{errors.name.message}</p>
+            )}
           </div>
 
           <div>
-            <label htmlFor="board-description" className="block text-sm font-medium text-gray-700 mb-1">
+            <label
+              htmlFor="board-description"
+              className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300"
+            >
               Deskripsi (Opsional)
             </label>
             <textarea
               id="board-description"
               rows={3}
               {...register('description')}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 shadow-sm
+                         placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-900
+                         dark:text-slate-100 dark:placeholder:text-slate-500
+                         focus:ring-2 focus:ring-indigo-500/50 dark:focus:ring-indigo-400/40"
               placeholder="Deskripsikan board ini"
             />
           </div>
@@ -205,14 +226,15 @@ export function BoardsPage() {
             <button
               type="button"
               onClick={() => setIsCreateModalOpen(false)}
-              className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors"
+              className="rounded-md bg-slate-100 px-4 py-2 text-slate-700 transition-colors hover:bg-slate-200
+                         dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
             >
               Batal
             </button>
             <button
               type="submit"
               disabled={createMutation.isPending}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:bg-indigo-400 transition-colors"
+              className="rounded-md bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700 disabled:bg-blue-400"
             >
               {createMutation.isPending ? 'Membuat...' : 'Buat Board'}
             </button>

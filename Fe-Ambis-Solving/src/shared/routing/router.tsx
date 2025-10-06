@@ -16,9 +16,10 @@ const publicRoutes = [
 // Lazy load additional components
 const BoardsPage = lazy(() => import('../../features/board/pages/BoardsPage').then(m => ({ default: m.BoardsPage })));
 
+// shared/routing/router.tsx (potongan penting)
 const privateRoutes = [
   { path: '/boards', component: BoardsPage },
-  { path: '/board/$boardId', component: BoardPage },
+  { path: '/boards/$boardId', component: BoardPage }, // ✅ ganti ke plural
   { path: '/timeline', component: TimeLinePage },
   { path: '/notes', component: NotesPage }
 ];
