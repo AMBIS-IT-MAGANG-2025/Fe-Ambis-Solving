@@ -27,7 +27,7 @@ type Task = { id: string; title: string; columnId: string; order?: number };
 /** ===== Util: validasi 24-hex ===== */
 const isHex24 = (s: string) => /^[a-f0-9]{24}$/i.test(s);
 
-/** ===== Status helper untuk pewarnaan kartu ===== */
+/** ===== Status helper untuk pewarnaan kartu & glow ===== */
 type Status = "todo" | "inprogress" | "done";
 
 const COLUMN_KEYS = {
@@ -42,6 +42,10 @@ function columnStatus(col: { id: string; name?: string }): Status {
   if (COLUMN_KEYS.done.some((k) => id === k || name.includes(k))) return "done";
   if (COLUMN_KEYS.inprogress.some((k) => id === k || name.includes(k))) return "inprogress";
   return "todo";
+}
+
+function toneClass(status: Status) {
+  return status === "inprogress" ? "glow-blue" : status === "done" ? "glow-green" : "glow-slate";
 }
 
 function taskCardClasses(status: Status, dragging: boolean) {
@@ -70,6 +74,39 @@ function taskCardClasses(status: Status, dragging: boolean) {
       );
   }
 }
+
+/** ====== PRIORITY (UI-only, disimpan di localStorage) ====== */
+type Priority = "low" | "medium" | "high";
+const PRIORITY_KEY = "ambis.taskPriority.v1";
+
+const loadPriorityMap = (): Record<string, Priority> => {
+  try {
+    const raw = localStorage.getItem(PRIORITY_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+};
+const savePriorityMap = (map: Record<string, Priority>) => {
+  try {
+    localStorage.setItem(PRIORITY_KEY, JSON.stringify(map));
+  } catch {}
+};
+const nextPriority = (p: Priority): Priority =>
+  p === "low" ? "medium" : p === "medium" ? "high" : "low";
+
+const priorityChip = (p: Priority) => {
+  switch (p) {
+    case "high":
+      return "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200 border border-rose-200 dark:border-rose-800";
+    case "medium":
+      return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200 border border-amber-200 dark:border-amber-800";
+    default:
+      return "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700";
+  }
+};
+const priorityLabel = (p: Priority) =>
+  p === "high" ? "High" : p === "medium" ? "Medium" : "Small";
 
 /** Cari boardId dari props, params, query, atau path */
 function useSafeBoardId(propId?: string): string | null {
@@ -119,7 +156,22 @@ function SectionHeader({ title, onRefresh }: { title: string; onRefresh?: () => 
 export function BoardPage(props: { boardId?: string }) {
   const boardId = useSafeBoardId(props.boardId);
   const qc = useQueryClient();
-  const { addEvent } = useBoardStore(); // payload minimal saja supaya cocok tipe store sekarang
+  const { addEvent } = useBoardStore(); // payload minimal agar cocok tipe store sekarang
+
+  // Map priority per taskId (persist di localStorage)
+  const [priorityByTask, setPriorityByTask] = useState<Record<string, Priority>>(
+    () => loadPriorityMap()
+  );
+  const setTaskPriority = (taskId: string, prio: Priority) => {
+    setPriorityByTask((prev) => {
+      const next = { ...prev, [taskId]: prio };
+      savePriorityMap(next);
+      return next;
+    });
+  };
+
+  // Priority pilihan saat "Tambah task" per kolom
+  const [newPriorityByCol, setNewPriorityByCol] = useState<Record<string, Priority>>({});
 
   if (!boardId) {
     return (
@@ -158,8 +210,11 @@ export function BoardPage(props: { boardId?: string }) {
   /** ===== Mutations (catat event: payload MINIMAL) ===== */
   const mCreate = useMutation<Task, Error, { title: string; columnId: string }>({
     mutationFn: (p) => createTask({ boardId, ...p }) as Promise<Task>,
-    onSuccess: (task) => {
+    onSuccess: (task, vars) => {
       qc.invalidateQueries({ queryKey: ["tasks", boardId] });
+      // set priority untuk task baru (UI-only)
+      const pr = newPriorityByCol[vars.columnId] ?? "medium";
+      setTaskPriority(task.id, pr);
       addEvent({ type: "task_created", taskId: task.id, boardId });
     },
   });
@@ -185,7 +240,6 @@ export function BoardPage(props: { boardId?: string }) {
       mutationFn: (p) => moveTask(p) as Promise<void>,
       onSuccess: (_res, vars) => {
         qc.invalidateQueries({ queryKey: ["tasks", boardId] });
-        // Hanya kirim field yang diakui store
         addEvent({ type: "task_moved", taskId: vars.taskId, boardId });
       },
     }
@@ -284,12 +338,18 @@ export function BoardPage(props: { boardId?: string }) {
           {columns.map((col) => (
             <Droppable droppableId={col.id} key={col.id}>
               {(provided) => {
-                const status = columnStatus(col); // status kolom saat ini
+                const status = columnStatus(col);
+                const tone = toneClass(status);
+                const selectedPrio = newPriorityByCol[col.id] ?? "medium";
                 return (
                   <div
                     ref={provided.innerRef}
                     {...provided.droppableProps}
-                    className="min-h-[420px] rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900"
+                    className={`
+                      min-h-[420px] rounded-2xl border border-slate-200 bg-white p-3
+                      dark:border-slate-800 dark:bg-slate-900
+                      glow-column ${tone}
+                    `}
                   >
                     <SectionHeader
                       title={col.name}
@@ -300,7 +360,7 @@ export function BoardPage(props: { boardId?: string }) {
 
                     {/* Tambah task cepat */}
                     <form
-                      className="mb-3 flex gap-2"
+                      className="mb-3 flex flex-col gap-2"
                       onSubmit={(e) => {
                         e.preventDefault();
                         const title = (newTitleByCol[col.id] || "").trim();
@@ -311,54 +371,100 @@ export function BoardPage(props: { boardId?: string }) {
                         );
                       }}
                     >
-                      <input
-                        value={newTitleByCol[col.id] || ""}
-                        onChange={(e) => setTitle(col.id, e.target.value)}
-                        placeholder="Tambah task…"
-                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-indigo-400/40"
-                      />
-                      <button
-                        type="submit"
-                        className="inline-flex items-center gap-1 rounded-xl bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-                        disabled={mCreate.isPending}
-                        title="Tambah task"
-                      >
-                        <Plus className="size-4" />
-                        Add
-                      </button>
+                      <div className="flex gap-2">
+                        <input
+                          value={newTitleByCol[col.id] || ""}
+                          onChange={(e) => setTitle(col.id, e.target.value)}
+                          placeholder="Tambah task…"
+                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-indigo-400/40"
+                        />
+                        <button
+                          type="submit"
+                          className="inline-flex items-center gap-1 rounded-xl bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                          disabled={mCreate.isPending}
+                          title="Tambah task"
+                        >
+                          <Plus className="size-4" />
+                          Add
+                        </button>
+                      </div>
+
+                      {/* Picker Priority */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-500 dark:text-slate-400">
+                          Priority:
+                        </span>
+                        <div className="flex overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
+                          {(["low", "medium", "high"] as Priority[]).map((p) => (
+                            <button
+                              type="button"
+                              key={p}
+                              onClick={() =>
+                                setNewPriorityByCol((s) => ({ ...s, [col.id]: p }))
+                              }
+                              className={
+                                "px-3 py-1 text-xs font-medium " +
+                                (selectedPrio === p
+                                  ? priorityChip(p)
+                                  : "bg-transparent text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800")
+                              }
+                              title={priorityLabel(p)}
+                            >
+                              {priorityLabel(p)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </form>
 
                     {/* List task */}
-                    {tasksByCol(col.id).map((t, index) => (
-                      <Draggable draggableId={t.id} index={index} key={t.id}>
-                        {(prov, snap) => (
-                          <div
-                            ref={prov.innerRef}
-                            {...prov.draggableProps}
-                            {...prov.dragHandleProps}
-                            className={taskCardClasses(status, snap.isDragging)}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="min-w-0 text-sm">
-                                <InlineEditableTitle
-                                  title={t.title}
-                                  onSave={(title) =>
-                                    mUpdate.mutate({ taskId: t.id, title })
+                    {tasksByCol(col.id).map((t, index) => {
+                      const prio = priorityByTask[t.id] ?? "medium";
+                      return (
+                        <Draggable draggableId={t.id} index={index} key={t.id}>
+                          {(prov, snap) => (
+                            <div
+                              ref={prov.innerRef}
+                              {...prov.draggableProps}
+                              {...prov.dragHandleProps}
+                              className={`${taskCardClasses(status, snap.isDragging)} glow-card ${tone}`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="min-w-0 text-sm">
+                                  <InlineEditableTitle
+                                    title={t.title}
+                                    onSave={(title) =>
+                                      mUpdate.mutate({ taskId: t.id, title })
+                                    }
+                                  />
+                                </div>
+
+                                {/* Badge priority — klik untuk toggle */}
+                                <button
+                                  type="button"
+                                  onClick={() => setTaskPriority(t.id, nextPriority(prio))}
+                                  className={
+                                    "inline-flex items-center rounded-full px-2 py-0.5 text-xs " +
+                                    priorityChip(prio)
                                   }
-                                />
+                                  title={`Klik untuk ubah priority (${priorityLabel(prio)})`}
+                                >
+                                  {priorityLabel(prio)}
+                                </button>
+
+                                <button
+                                  onClick={() => mDelete.mutate(t.id)}
+                                  className="rounded-md p-1 text-slate-600 hover:bg-slate-100 hover:text-red-600 dark:text-slate-300 dark:hover:bg-slate-800"
+                                  title="Hapus task"
+                                >
+                                  <Trash2 className="size-4" />
+                                </button>
                               </div>
-                              <button
-                                onClick={() => mDelete.mutate(t.id)}
-                                className="rounded-md p-1 text-slate-600 hover:bg-slate-100 hover:text-red-600 dark:text-slate-300 dark:hover:bg-slate-800"
-                                title="Hapus task"
-                              >
-                                <Trash2 className="size-4" />
-                              </button>
                             </div>
-                          </div>
-                        )}
-                      </Draggable>
-                    ))}
+                          )}
+                        </Draggable>
+                      );
+                    })}
                     {provided.placeholder}
                   </div>
                 );
