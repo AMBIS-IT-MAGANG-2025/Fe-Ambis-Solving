@@ -71,3 +71,14 @@ invalidateQueries adalah kunci agar cache “nyambung” setelah mutate.
 
 
 Baru sampai task minggu ke 2 tinggal yang ke 3
+
+
+Tinggal syncronsisasi dengan BE
+
+Core komputer 
+Layak atau tidak
+OS naon
+Ram naon ?
+Kesimpulan
+Yang bagus berapa ?
+Yang jelek berapa ?

@@ -1,35 +1,34 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './index.css'
+// This file is not used. The app uses TanStack Router via RouterProvider in main.tsx
+// The routing is handled in src/shared/routing/router.tsx
+// This file contains duplicate routing code that has been disabled to avoid conflicts.
 
-function App() {
-  const [count, setCount] = useState(0)
+// import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+// import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+// import { LoginPage } from "./features/auth/pages/LoginPage";
+// import BoardsPage from "./features/board/pages/BoardPage";
+// import BoardPage from "./features/board/pages/BoardPage";
+// import { useEffect } from "react";
+// import { socket } from "./shared/services/socket";
 
-  return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
-}
+// const qc = new QueryClient();
 
-export default App
+// function Protected({ children }: { children: React.ReactNode }) {
+//   const token = localStorage.getItem("token");
+//   return token ? <>{children}</> : <Navigate to="/login" replace />;
+// }
+
+// export default function App() {
+//   return (
+//     <QueryClientProvider client={qc}>
+//       <BrowserRouter>
+//         <Routes>
+//           <Route path="/login" element={<LoginPage />} />
+//           <Route path="/boards" element={<Protected><BoardsPage /></Protected>} />
+//           <Route path="/board/:id" element={<Protected><BoardPage /></Protected>} />
+//           <Route path="/" element={<Navigate to="/boards" replace />} />
+//           <Route path="*" element={<div className="p-6">404</div>} />
+//         </Routes>
+//       </BrowserRouter>
+//     </QueryClientProvider>
+//   );
+// }
